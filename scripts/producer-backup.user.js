@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Producer.ai Full Backup Exporter
 // @namespace    https://github.com/
-// @version      1.1.1
+// @version      1.2.0
 // @description  Export all tracks from a Producer.ai project: metadata JSON, prompt summary, CSV, and optional audio files.
 // @match        https://producer.ai/*
 // @match        https://www.producer.ai/*
@@ -121,6 +121,76 @@
     return Array.from(ids);
   }
 
+  function isElementVisible(el) {
+    if (!el) return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 80 && rect.height > 80;
+  }
+
+  function isScrollable(el) {
+    if (!el) return false;
+    const style = getComputedStyle(el);
+    const overflowY = style.overflowY || "";
+    const range = el.scrollHeight - el.clientHeight;
+    return /(auto|scroll|overlay)/i.test(overflowY) && range > 40;
+  }
+
+  function findSongsHeadingElement() {
+    const nodes = Array.from(document.querySelectorAll("h1, h2, h3, div, span"));
+    return nodes.find((el) => (el.textContent || "").trim().toLowerCase() === "songs") || null;
+  }
+
+  function findScrollContainerNearSongs() {
+    const heading = findSongsHeadingElement();
+    if (!heading) return null;
+
+    let current = heading.parentElement;
+    while (current && current !== document.body) {
+      if (isElementVisible(current) && isScrollable(current)) return current;
+      current = current.parentElement;
+    }
+    return null;
+  }
+
+  function findBestScrollableContainer() {
+    const els = Array.from(document.querySelectorAll("main, section, article, div, ul, aside"));
+    const candidates = [];
+    for (const el of els) {
+      if (!isElementVisible(el) || !isScrollable(el)) continue;
+      const range = el.scrollHeight - el.clientHeight;
+      const width = el.clientWidth || 1;
+      // Prefer wider containers (main content) over narrow sidebars.
+      const score = range * (width / 200);
+      candidates.push({ el, score });
+    }
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates[0].el;
+  }
+
+  function resolveScrollTarget() {
+    const nearSongs = findScrollContainerNearSongs();
+    if (nearSongs) return nearSongs;
+    const best = findBestScrollableContainer();
+    if (best) return best;
+    return document.scrollingElement || document.documentElement;
+  }
+
+  function getScrollMetrics(target) {
+    if (!target) return { top: 0, max: 0, range: 0 };
+    const top = target.scrollTop || 0;
+    const max = Math.max(0, (target.scrollHeight || 0) - (target.clientHeight || 0));
+    return { top, max, range: max };
+  }
+
+  function scrollTargetStep(target) {
+    if (!target) return;
+    const step = Math.max(350, Math.floor((target.clientHeight || 600) * 0.9));
+    const nextTop = Math.min((target.scrollTop || 0) + step, Math.max(0, target.scrollHeight - target.clientHeight));
+    target.scrollTop = nextTop;
+    target.dispatchEvent(new Event("scroll", { bubbles: true }));
+  }
+
   async function fetchGenerationsApi(ids) {
     let lastError = "unknown error";
     for (const apiUrl of API_URL_CANDIDATES) {
@@ -141,30 +211,40 @@
   }
 
   async function autoScrollToLoadSongs(maxRounds = 80, idleThreshold = 5, waitMs = 1200) {
+    const target = resolveScrollTarget();
+    const targetDesc = target === document.scrollingElement || target === document.documentElement
+      ? "document"
+      : `${target.tagName.toLowerCase()}#${target.id || "-"}${target.className ? "." + String(target.className).split(/\s+/).slice(0, 2).join(".") : ""}`;
+
     let idleRounds = 0;
-    let prevHeight = -1;
+    let prevMax = -1;
+    let prevTop = -1;
     let prevCount = -1;
 
     for (let i = 0; i < maxRounds; i++) {
-      window.scrollTo(0, document.body.scrollHeight);
+      scrollTargetStep(target);
       await sleep(waitMs);
 
-        const h = document.body.scrollHeight;
-        const c = extractSongIdsFromPage().length;
+      const m = getScrollMetrics(target);
+      const c = extractSongIdsFromPage().length;
 
-      if (h === prevHeight && c === prevCount) {
+      if (m.max === prevMax && m.top === prevTop && c === prevCount) {
         idleRounds++;
       } else {
         idleRounds = 0;
       }
 
-      prevHeight = h;
+      prevMax = m.max;
+      prevTop = m.top;
       prevCount = c;
-      setStatus(`Scanning page... loaded ${c} song links`);
+      setStatus(`Scanning ${targetDesc}... loaded ${c} song links`);
 
       if (idleRounds >= idleThreshold) break;
     }
-    window.scrollTo(0, 0);
+    if (target && typeof target.scrollTop === "number") {
+      target.scrollTop = 0;
+      target.dispatchEvent(new Event("scroll", { bubbles: true }));
+    }
   }
 
   async function fetchGenerationsByIds(songIds, batchSize = DEFAULT_BATCH_SIZE, delayMs = DEFAULT_DELAY_MS) {
