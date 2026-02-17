@@ -1,14 +1,13 @@
 // ==UserScript==
 // @name         Producer.ai Full Backup Exporter
 // @namespace    https://github.com/
-// @version      1.1.0
+// @version      1.1.1
 // @description  Export all tracks from a Producer.ai project: metadata JSON, prompt summary, CSV, and optional audio files.
-// @match        https://producer.ai/library/*
-// @match        https://producer.ai/project/*
-// @match        https://www.producer.ai/library/*
-// @match        https://www.producer.ai/project/*
+// @match        https://producer.ai/*
+// @match        https://www.producer.ai/*
 // @grant        none
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js
+// @run-at       document-idle
 // ==/UserScript==
 
 (function () {
@@ -411,7 +410,7 @@
     panel.style.top = "12px";
     panel.style.right = "12px";
     panel.style.width = "280px";
-    panel.style.zIndex = "999999";
+    panel.style.zIndex = "2147483647";
     panel.style.background = "rgba(18, 18, 22, 0.95)";
     panel.style.color = "#fff";
     panel.style.padding = "10px";
@@ -427,7 +426,7 @@
 
     const status = document.createElement("div");
     status.id = STATUS_ID;
-    status.textContent = "Ready. Open a project page and run export.";
+    status.textContent = `Ready on ${location.pathname}.`;
     status.style.opacity = "0.9";
     status.style.marginBottom = "8px";
     status.style.minHeight = "32px";
@@ -468,7 +467,7 @@
 
     const hint = document.createElement("div");
     hint.textContent =
-      "Tip: stay on the project page until export finishes. Large libraries may need multiple runs.";
+      "Tip: open your songs page (library/project), keep tab active while export runs.";
     hint.style.opacity = "0.8";
     hint.style.marginTop = "8px";
     hint.style.lineHeight = "1.35";
@@ -482,7 +481,8 @@
   }
 
   function shouldShowPanel() {
-    return /\/project\//.test(location.pathname) || /\/library\//.test(location.pathname);
+    // Always show on producer.ai to avoid missing SPA route variants.
+    return true;
   }
 
   function mountIfNeeded() {
@@ -494,7 +494,15 @@
     }
   }
 
-  const observer = new MutationObserver(() => mountIfNeeded());
-  observer.observe(document.body, { childList: true, subtree: true });
-  mountIfNeeded();
+  function start() {
+    mountIfNeeded();
+    const observer = new MutationObserver(() => mountIfNeeded());
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start, { once: true });
+  } else {
+    start();
+  }
 })();

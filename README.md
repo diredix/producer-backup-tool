@@ -75,6 +75,13 @@ Fix:
 2. Paste the raw userscript (starts with `// ==UserScript==`, not `<!DOCTYPE html>`).
 3. Save and refresh your Producer project page.
 
+### No export panel appears
+
+1. Make sure Tampermonkey script is enabled.
+2. Confirm script version is at least `1.1.1`.
+3. Hard-refresh the page (`Ctrl+F5`).
+4. Check you are on `producer.ai` / `www.producer.ai` while logged in.
+
 ## Publish to GitHub
 
 From `C:\Temp\producer-backup-tool`:
