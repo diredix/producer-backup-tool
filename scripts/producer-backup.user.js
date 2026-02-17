@@ -1,8 +1,9 @@
 // ==UserScript==
 // @name         Producer.ai Full Backup Exporter
 // @namespace    https://github.com/
-// @version      1.0.0
+// @version      1.0.1
 // @description  Export all tracks from a Producer.ai project: metadata JSON, prompt summary, CSV, and optional audio files.
+// @match        https://producer.ai/project/*
 // @match        https://www.producer.ai/project/*
 // @grant        none
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js
@@ -445,4 +446,3 @@
   observer.observe(document.body, { childList: true, subtree: true });
   mountIfNeeded();
 })();
-

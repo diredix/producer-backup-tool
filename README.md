@@ -29,6 +29,9 @@ If a platform changes models, storage policy, or availability, you need an offli
    - `scripts/producer-backup.user.js`
 3. Save the script.
 
+Raw script URL:
+`https://raw.githubusercontent.com/diredix/producer-backup-tool/main/scripts/producer-backup.user.js`
+
 ## Usage
 
 1. Log in to `https://www.producer.ai`.
@@ -59,6 +62,17 @@ The script auto-scrolls to discover song links, requests metadata in batches, an
 - Audio URLs may vary between model versions; some generations may export metadata only.
 - Very high song counts can hit API limits; rerun per project or in off-peak hours.
 
+## Troubleshooting
+
+### "Parsing error: Unexpected token <"
+
+You pasted HTML (for example a GitHub page) instead of the userscript JS.
+
+Fix:
+1. Delete editor contents.
+2. Paste the raw userscript (starts with `// ==UserScript==`, not `<!DOCTYPE html>`).
+3. Save and refresh your Producer project page.
+
 ## Publish to GitHub
 
 From `C:\Temp\producer-backup-tool`:
@@ -75,4 +89,3 @@ git push -u origin main
 ## Security note
 
 Userscripts run in your browser context. Always review code before installing.
-
