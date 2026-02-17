@@ -35,13 +35,15 @@ Raw script URL:
 ## Usage
 
 1. Log in to `https://www.producer.ai`.
-2. Open a project page, e.g. `https://www.producer.ai/project/...`
+2. Open a page with your songs:
+   - `https://www.producer.ai/project/...` or
+   - `https://www.producer.ai/library/my-songs`
 3. Wait until the page starts loading your songs.
 4. Use one of the panel buttons:
    - `Export ZIP (Metadata + Prompts)`
    - `Export ZIP (Metadata + Prompts + Audio)`
 
-The script auto-scrolls to discover song links, requests metadata in batches, and downloads a ZIP.
+The script auto-scrolls to discover song links/IDs, requests metadata in batches, and downloads a ZIP.
 
 ## Output format
 

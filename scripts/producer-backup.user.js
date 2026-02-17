@@ -1,9 +1,11 @@
 // ==UserScript==
 // @name         Producer.ai Full Backup Exporter
 // @namespace    https://github.com/
-// @version      1.0.1
+// @version      1.1.0
 // @description  Export all tracks from a Producer.ai project: metadata JSON, prompt summary, CSV, and optional audio files.
+// @match        https://producer.ai/library/*
 // @match        https://producer.ai/project/*
+// @match        https://www.producer.ai/library/*
 // @match        https://www.producer.ai/project/*
 // @grant        none
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js
@@ -12,7 +14,13 @@
 (function () {
   "use strict";
 
-  const API_URL = "https://www.producer.ai/__api/v2/generations";
+  const API_URL_CANDIDATES = Array.from(
+    new Set([
+      `${location.origin}/__api/v2/generations`,
+      "https://www.producer.ai/__api/v2/generations",
+      "https://producer.ai/__api/v2/generations",
+    ])
+  );
   const PANEL_ID = "producer-backup-exporter-panel";
   const STATUS_ID = "producer-backup-exporter-status";
   const DEFAULT_BATCH_SIZE = 40;
@@ -68,14 +76,69 @@
   }
 
   function extractSongIdsFromPage() {
-    const anchors = Array.from(document.querySelectorAll("a[href*='/song/']"));
+    const anchors = Array.from(document.querySelectorAll("a[href*='/song/'], a[href*='/library/song/']"));
     const ids = new Set();
     for (const a of anchors) {
       const href = a.getAttribute("href") || "";
-      const match = href.match(/\/song\/([a-f0-9-]{8,})/i);
+      const match = href.match(/\/song\/([a-f0-9-]{8,})/i) || href.match(/\/library\/song\/([a-f0-9-]{8,})/i);
       if (match) ids.add(match[1]);
     }
+
+    // Common data attribute fallback used by virtualized lists/cards.
+    const attrSelectors = [
+      "[data-riff-id]",
+      "[data-song-id]",
+      "[data-generation-id]",
+      "[data-id]",
+    ];
+    for (const sel of attrSelectors) {
+      for (const el of document.querySelectorAll(sel)) {
+        const candidate =
+          el.getAttribute("data-riff-id") ||
+          el.getAttribute("data-song-id") ||
+          el.getAttribute("data-generation-id") ||
+          el.getAttribute("data-id") ||
+          "";
+        if (/^[a-f0-9-]{8,}$/i.test(candidate)) ids.add(candidate);
+      }
+    }
+
+    // HTML regex fallback for SPA payloads (e.g., __NEXT_DATA__).
+    const html = document.documentElement ? document.documentElement.innerHTML : "";
+    if (html) {
+      const patterns = [
+        /\/song\/([a-f0-9-]{8,})/gi,
+        /"riff_id"\s*:\s*"([a-f0-9-]{8,})"/gi,
+        /"riffId"\s*:\s*"([a-f0-9-]{8,})"/gi,
+      ];
+      for (const re of patterns) {
+        let m;
+        while ((m = re.exec(html)) !== null) {
+          if (m[1]) ids.add(m[1]);
+        }
+      }
+    }
+
     return Array.from(ids);
+  }
+
+  async function fetchGenerationsApi(ids) {
+    let lastError = "unknown error";
+    for (const apiUrl of API_URL_CANDIDATES) {
+      try {
+        const response = await fetch(apiUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ riff_ids: ids }),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status} from ${apiUrl}`);
+        return await response.json();
+      } catch (err) {
+        lastError = String(err);
+      }
+    }
+    throw new Error(`All API endpoints failed: ${lastError}`);
   }
 
   async function autoScrollToLoadSongs(maxRounds = 80, idleThreshold = 5, waitMs = 1200) {
@@ -87,8 +150,8 @@
       window.scrollTo(0, document.body.scrollHeight);
       await sleep(waitMs);
 
-      const h = document.body.scrollHeight;
-      const c = extractSongIdsFromPage().length;
+        const h = document.body.scrollHeight;
+        const c = extractSongIdsFromPage().length;
 
       if (h === prevHeight && c === prevCount) {
         idleRounds++;
@@ -115,18 +178,7 @@
       setStatus(`Fetching metadata batch ${i + 1}/${batches.length} (${ids.length} ids)`);
 
       try {
-        const response = await fetch(API_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ riff_ids: ids }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-
-        const data = await response.json();
+        const data = await fetchGenerationsApi(ids);
         const generations = Array.isArray(data.generations) ? data.generations : [];
         all.push(...generations);
       } catch (err) {
@@ -430,7 +482,7 @@
   }
 
   function shouldShowPanel() {
-    return /\/project\//.test(location.pathname);
+    return /\/project\//.test(location.pathname) || /\/library\//.test(location.pathname);
   }
 
   function mountIfNeeded() {
