@@ -2,6 +2,15 @@
 
 Backup helper for **Producer.ai** projects (former Riffusion workflow).
 
+Keywords: `Producer.ai downloader`, `Producer.ai backup`, `Riffusion backup tool`, `bulk download songs`, `export prompts`, `metadata export`, `Tampermonkey userscript`.
+
+If you are searching for:
+- **How to download all songs from Producer.ai**
+- **How to export Producer.ai prompts and metadata**
+- **Bulk backup tool for Producer.ai / Riffusion library**
+
+this repository is built for that use case.
+
 This tool is a browser userscript that exports your project data into a ZIP:
 
 - `metadata/*.json` for each generation
@@ -13,6 +22,7 @@ This tool is a browser userscript that exports your project data into a ZIP:
 ## Why
 
 If a platform changes models, storage policy, or availability, you need an offline backup of your own work.
+This project is focused on **data portability** for AI music generation workflows.
 
 ## Important
 
@@ -31,6 +41,9 @@ If a platform changes models, storage policy, or availability, you need an offli
 
 Raw script URL:
 `https://raw.githubusercontent.com/diredix/producer-backup-tool/main/scripts/producer-backup.user.js`
+
+Direct installer URL:
+`https://github.com/diredix/producer-backup-tool/raw/main/scripts/producer-backup.user.js`
 
 ## Usage
 
@@ -98,3 +111,12 @@ git push -u origin main
 ## Security note
 
 Userscripts run in your browser context. Always review code before installing.
+
+## Search terms
+
+People may also look for this repo using:
+- producer ai export all songs
+- producer ai download all tracks
+- riffusion export prompts
+- producer ai metadata downloader
+- producer.ai tampermonkey backup script
