@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Producer.ai Full Backup Exporter
 // @namespace    https://github.com/
-// @version      1.2.0
+// @version      1.2.1
 // @description  Export all tracks from a Producer.ai project: metadata JSON, prompt summary, CSV, and optional audio files.
 // @match        https://producer.ai/*
 // @match        https://www.producer.ai/*
@@ -132,7 +132,7 @@
     const style = getComputedStyle(el);
     const overflowY = style.overflowY || "";
     const range = el.scrollHeight - el.clientHeight;
-    return /(auto|scroll|overlay)/i.test(overflowY) && range > 40;
+    return (/(auto|scroll|overlay)/i.test(overflowY) || range > 40) && range > 40;
   }
 
   function findSongsHeadingElement() {
@@ -152,15 +152,39 @@
     return null;
   }
 
+  function countRegexMatches(text, regex, maxCount = 40) {
+    if (!text) return 0;
+    let count = 0;
+    let m;
+    while ((m = regex.exec(text)) !== null) {
+      count++;
+      if (count >= maxCount) break;
+    }
+    return count;
+  }
+
+  function scoreScrollableCandidate(el) {
+    if (!el) return -Infinity;
+    const rect = el.getBoundingClientRect();
+    const range = Math.max(0, (el.scrollHeight || 0) - (el.clientHeight || 0));
+    const widthScore = Math.max(0, el.clientWidth || 0);
+    const anchorScore = el.querySelectorAll("a[href*='/song/'], a[href*='/library/song/']").length * 900;
+    const text = (el.innerText || "").slice(0, 12000);
+    const durationScore = countRegexMatches(text, /\b\d{1,2}:\d{2}\b/g, 40) * 550;
+
+    // Penalize likely sidebars.
+    const isLeftNarrow = rect.left < window.innerWidth * 0.22 && rect.width < window.innerWidth * 0.35;
+    const sidebarPenalty = isLeftNarrow ? 120000 : 0;
+
+    return range * 6 + widthScore * 2 + anchorScore + durationScore - sidebarPenalty;
+  }
+
   function findBestScrollableContainer() {
     const els = Array.from(document.querySelectorAll("main, section, article, div, ul, aside"));
     const candidates = [];
     for (const el of els) {
       if (!isElementVisible(el) || !isScrollable(el)) continue;
-      const range = el.scrollHeight - el.clientHeight;
-      const width = el.clientWidth || 1;
-      // Prefer wider containers (main content) over narrow sidebars.
-      const score = range * (width / 200);
+      const score = scoreScrollableCandidate(el);
       candidates.push({ el, score });
     }
     if (!candidates.length) return null;
@@ -168,27 +192,56 @@
     return candidates[0].el;
   }
 
-  function resolveScrollTarget() {
-    const nearSongs = findScrollContainerNearSongs();
-    if (nearSongs) return nearSongs;
-    const best = findBestScrollableContainer();
-    if (best) return best;
-    return document.scrollingElement || document.documentElement;
+  function describeTarget(target) {
+    if (!target) return "none";
+    if (target === document.scrollingElement || target === document.documentElement) return "document";
+    const cls = String(target.className || "").trim().split(/\s+/).slice(0, 2).join(".");
+    return `${target.tagName.toLowerCase()}#${target.id || "-"}${cls ? "." + cls : ""}`;
   }
 
-  function getScrollMetrics(target) {
-    if (!target) return { top: 0, max: 0, range: 0 };
-    const top = target.scrollTop || 0;
-    const max = Math.max(0, (target.scrollHeight || 0) - (target.clientHeight || 0));
-    return { top, max, range: max };
+  function resolveScrollTargets() {
+    const targets = [];
+
+    const nearSongs = findScrollContainerNearSongs();
+    if (nearSongs) targets.push(nearSongs);
+
+    const best = findBestScrollableContainer();
+    if (best) targets.push(best);
+
+    const generic = Array.from(document.querySelectorAll("main, section, article, div, ul, aside"))
+      .filter((el) => isElementVisible(el) && isScrollable(el))
+      .map((el) => ({ el, score: scoreScrollableCandidate(el) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 6)
+      .map((x) => x.el);
+    targets.push(...generic);
+
+    targets.push(document.scrollingElement || document.documentElement);
+
+    const unique = [];
+    const seen = new Set();
+    for (const t of targets) {
+      if (!t) continue;
+      if (seen.has(t)) continue;
+      seen.add(t);
+      unique.push(t);
+    }
+    return unique;
   }
 
   function scrollTargetStep(target) {
-    if (!target) return;
+    if (!target) return false;
+    const before = target.scrollTop || 0;
     const step = Math.max(350, Math.floor((target.clientHeight || 600) * 0.9));
     const nextTop = Math.min((target.scrollTop || 0) + step, Math.max(0, target.scrollHeight - target.clientHeight));
     target.scrollTop = nextTop;
     target.dispatchEvent(new Event("scroll", { bubbles: true }));
+    try {
+      target.dispatchEvent(new WheelEvent("wheel", { deltaY: step, bubbles: true }));
+    } catch {
+      // ignore
+    }
+    return (target.scrollTop || 0) !== before;
   }
 
   async function fetchGenerationsApi(ids) {
@@ -210,40 +263,44 @@
     throw new Error(`All API endpoints failed: ${lastError}`);
   }
 
-  async function autoScrollToLoadSongs(maxRounds = 80, idleThreshold = 5, waitMs = 1200) {
-    const target = resolveScrollTarget();
-    const targetDesc = target === document.scrollingElement || target === document.documentElement
-      ? "document"
-      : `${target.tagName.toLowerCase()}#${target.id || "-"}${target.className ? "." + String(target.className).split(/\s+/).slice(0, 2).join(".") : ""}`;
+  async function autoScrollToLoadSongs(maxRounds = 90, idleThreshold = 6, waitMs = 1000) {
+    let targets = resolveScrollTargets();
+    if (!targets.length) targets = [document.scrollingElement || document.documentElement];
 
     let idleRounds = 0;
-    let prevMax = -1;
-    let prevTop = -1;
     let prevCount = -1;
 
     for (let i = 0; i < maxRounds; i++) {
-      scrollTargetStep(target);
+      if (i % 5 === 0) {
+        targets = resolveScrollTargets();
+        if (!targets.length) targets = [document.scrollingElement || document.documentElement];
+      }
+
+      let movedAny = false;
+      for (const t of targets) movedAny = scrollTargetStep(t) || movedAny;
+      window.scrollBy(0, Math.max(280, Math.floor(window.innerHeight * 0.75)));
+
       await sleep(waitMs);
 
-      const m = getScrollMetrics(target);
       const c = extractSongIdsFromPage().length;
 
-      if (m.max === prevMax && m.top === prevTop && c === prevCount) {
+      if (!movedAny && c === prevCount) {
         idleRounds++;
       } else {
         idleRounds = 0;
       }
 
-      prevMax = m.max;
-      prevTop = m.top;
       prevCount = c;
-      setStatus(`Scanning ${targetDesc}... loaded ${c} song links`);
+      const names = targets.slice(0, 3).map((t) => describeTarget(t)).join(" | ");
+      setStatus(`Scanning... loaded ${c} song links [${names}]`);
 
       if (idleRounds >= idleThreshold) break;
     }
-    if (target && typeof target.scrollTop === "number") {
-      target.scrollTop = 0;
-      target.dispatchEvent(new Event("scroll", { bubbles: true }));
+    for (const t of targets) {
+      if (t && typeof t.scrollTop === "number") {
+        t.scrollTop = 0;
+        t.dispatchEvent(new Event("scroll", { bubbles: true }));
+      }
     }
   }
 
