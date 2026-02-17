@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Producer.ai Full Backup Exporter
 // @namespace    https://github.com/
-// @version      1.2.1
+// @version      1.2.2
 // @description  Export all tracks from a Producer.ai project: metadata JSON, prompt summary, CSV, and optional audio files.
 // @match        https://producer.ai/*
 // @match        https://www.producer.ai/*
@@ -232,12 +232,13 @@
   function scrollTargetStep(target) {
     if (!target) return false;
     const before = target.scrollTop || 0;
-    const step = Math.max(350, Math.floor((target.clientHeight || 600) * 0.9));
-    const nextTop = Math.min((target.scrollTop || 0) + step, Math.max(0, target.scrollHeight - target.clientHeight));
+    const maxTop = Math.max(0, (target.scrollHeight || 0) - (target.clientHeight || 0));
+    // For infinite lists, jumping near-bottom triggers loaders more reliably than tiny steps.
+    const nextTop = maxTop;
     target.scrollTop = nextTop;
     target.dispatchEvent(new Event("scroll", { bubbles: true }));
     try {
-      target.dispatchEvent(new WheelEvent("wheel", { deltaY: step, bubbles: true }));
+      target.dispatchEvent(new WheelEvent("wheel", { deltaY: Math.max(600, target.clientHeight || 600), bubbles: true }));
     } catch {
       // ignore
     }
@@ -263,12 +264,14 @@
     throw new Error(`All API endpoints failed: ${lastError}`);
   }
 
-  async function autoScrollToLoadSongs(maxRounds = 90, idleThreshold = 6, waitMs = 1000) {
+  async function autoScrollToLoadSongs(maxRounds = 140, idleThreshold = 10, waitMs = 1300) {
     let targets = resolveScrollTargets();
     if (!targets.length) targets = [document.scrollingElement || document.documentElement];
 
+    const minRoundsBeforeIdleBreak = 20;
     let idleRounds = 0;
     let prevCount = -1;
+    let bestCount = 0;
 
     for (let i = 0; i < maxRounds; i++) {
       if (i % 5 === 0) {
@@ -283,6 +286,7 @@
       await sleep(waitMs);
 
       const c = extractSongIdsFromPage().length;
+      if (c > bestCount) bestCount = c;
 
       if (!movedAny && c === prevCount) {
         idleRounds++;
@@ -294,7 +298,20 @@
       const names = targets.slice(0, 3).map((t) => describeTarget(t)).join(" | ");
       setStatus(`Scanning... loaded ${c} song links [${names}]`);
 
-      if (idleRounds >= idleThreshold) break;
+      if (idleRounds >= idleThreshold && i >= minRoundsBeforeIdleBreak) {
+        // One last delayed check for slow lazy-loading responses before exiting.
+        setStatus(`Waiting for delayed list load... currently ${c} links`);
+        await sleep(3500);
+        const afterWait = extractSongIdsFromPage().length;
+        if (afterWait > c) {
+          idleRounds = 0;
+          prevCount = afterWait;
+          if (afterWait > bestCount) bestCount = afterWait;
+          setStatus(`More songs appeared after wait: ${afterWait} links. Continuing scan...`);
+          continue;
+        }
+        break;
+      }
     }
     for (const t of targets) {
       if (t && typeof t.scrollTop === "number") {
